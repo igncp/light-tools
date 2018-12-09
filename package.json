@@ -5,7 +5,7 @@
   "description": "Set of scripts that are performance-sensitive",
   "main": "index.js",
   "scripts": {
-    "pre-commit": "find . ! -path '*node_modules*' ! -path '*.git*' ! -path '*target*' -name '*.rs' | xargs rustfmt --check"
+    "pre-commit": "sh helpers/format.sh --check"
   },
   "keywords": [],
   "author": "",
