@@ -1,0 +1,21 @@
+{
+  "name": "rusted-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Set of scripts that are performance-sensitive",
+  "main": "index.js",
+  "scripts": {
+    "pre-commit": "find . ! -path '*node_modules*' ! -path '*.git*' ! -path '*target*' -name '*.rs' | xargs rustfmt"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "husky": "^1.2.0"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "npm run pre-commit"
+    }
+  }
+}

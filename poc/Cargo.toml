@@ -1,0 +1,7 @@
+[package]
+name = "poc"
+version = "0.1.0"
+authors = ["Ignacio Carbajo <icarbajop@gmail.com>"]
+
+[dependencies]
+walkdir = "2"
