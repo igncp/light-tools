@@ -1,0 +1,6 @@
+[package]
+name = "compound_interest"
+version = "0.1.0"
+authors = ["Ignacio Carbajo <icarbajop@gmail.com>"]
+
+[dependencies]

@@ -1,0 +1,13 @@
+[package]
+name = "o"
+version = "0.1.0"
+authors = ["Ignacio Carbajo <icarbajop@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+serde_json = "1.0"
+clap = "2.32"
+serde = "1.0"
+serde_derive = "1.0"
+csv = "1"
+dirs = "1.0.4"

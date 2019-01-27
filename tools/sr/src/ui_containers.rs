@@ -1,13 +1,76 @@
 use matches::MatchItem;
 use ncurses::*;
+use std::cmp::min;
 
-// Relevant functions:
-// mvprintw(LINES() - 1, 2, "Press F1 to exit");
-//  printw("Use the arrow keys to move");
+static KEY_Q: i32 = 113;
+static MATCHES_WINDOW_TOP_POS: i32 = 6;
 
-static WINDOW_HEIGHT: i32 = 3;
-static WINDOW_WIDTH: i32 = 10;
-static KEY_ENTER_FIXED: i32 = 10;
+struct CreateWindowOpts {
+  height: i32,
+  start_x: i32,
+  start_y: i32,
+  width: i32,
+}
+
+struct UIWindow {
+  orig_window: WINDOW,
+  width: i32,
+}
+
+impl UIWindow {
+  fn print_line(&self, line: &String, y_pos: i32) {
+    let chars_len = min((&self).width as usize - 1, line.len() - 1);
+    let sliced_str = line.chars().take(chars_len).collect::<String>();
+    mvwprintw((&self).orig_window, y_pos, 1, &sliced_str);
+    wrefresh((&self).orig_window);
+  }
+}
+
+fn create_window(opts: &CreateWindowOpts) -> UIWindow {
+  let win = newwin(opts.height, opts.width, opts.start_y, opts.start_x);
+  box_(win, 0, 0);
+  wrefresh(win);
+
+  UIWindow {
+    orig_window: win,
+    width: opts.width,
+  }
+}
+
+fn get_screen_dimensions() -> (i32, i32) {
+  let mut max_x = 0;
+  let mut max_y = 0;
+  getmaxyx(stdscr(), &mut max_y, &mut max_x);
+
+  (max_x, max_y)
+}
+
+fn destroy_window(win: WINDOW) {
+  let ch = ' ' as chtype;
+
+  wborder(win, ch, ch, ch, ch, ch, ch, ch, ch);
+  wrefresh(win);
+
+  delwin(win);
+}
+
+fn create_matches_window(screen_width: i32, window_height: i32) -> UIWindow {
+  create_window(&CreateWindowOpts {
+    height: window_height,
+    width: screen_width,
+    start_x: 0,
+    start_y: MATCHES_WINDOW_TOP_POS,
+  })
+}
+
+fn create_title_window(screen_width: i32) -> UIWindow {
+  create_window(&CreateWindowOpts {
+    height: MATCHES_WINDOW_TOP_POS - 1,
+    width: screen_width,
+    start_x: 0,
+    start_y: 1,
+  })
+}
 
 pub fn init_matches_ui(matched_items: Vec<MatchItem>) {
   initscr();
@@ -15,72 +78,35 @@ pub fn init_matches_ui(matched_items: Vec<MatchItem>) {
   noecho();
 
   curs_set(CURSOR_VISIBILITY::CURSOR_INVISIBLE);
+  let (screen_width, screen_height) = get_screen_dimensions();
 
-  // for match_item in &matched_items {
-  // let full_str = format!("{} [{}/{}]\n", match_item.path, match_item.num, match_item.total);
-
-  // printw(&full_str);
-  // };
-  //
   refresh();
 
-  /* Get the screen bounds. */
-  let mut max_x = 0;
-  let mut max_y = 0;
-  getmaxyx(stdscr(), &mut max_y, &mut max_x);
+  let title_window = create_title_window(screen_width);
+  let matches_window_height = screen_height - MATCHES_WINDOW_TOP_POS;
+  let matches_window = create_matches_window(screen_width, matches_window_height);
 
-  /* Start in the center. */
-  let mut start_y = (max_y - WINDOW_HEIGHT) / 2;
-  let mut start_x = (max_x - WINDOW_WIDTH) / 2;
-  let mut win = create_win(start_y, start_x);
+  for (idx, match_item) in (&matched_items).iter().enumerate() {
+    let full_str = format!(
+      "{} [{}/{}]\n",
+      match_item.path, match_item.num, match_item.total
+    );
+
+    if (idx as i32) > matches_window_height - 3 {
+      break;
+    }
+
+    matches_window.print_line(&full_str, (idx + 1) as i32);
+  }
 
   let mut ch = getch();
-  while ch != KEY_ENTER_FIXED {
-    match ch {
-      KEY_LEFT => {
-        start_x -= 1;
-        destroy_win(win);
-        win = create_win(start_y, start_x);
-      }
-      KEY_RIGHT => {
-        start_x += 1;
-        destroy_win(win);
-        win = create_win(start_y, start_x);
-      }
-      KEY_UP => {
-        start_y -= 1;
-        destroy_win(win);
-        win = create_win(start_y, start_x);
-      }
-      KEY_DOWN => {
-        start_y += 1;
-        destroy_win(win);
-        win = create_win(start_y, start_x);
-      }
-      _ => {
-        let ch_str = format!("{} - {}\n", ch, KEY_ENTER);
-        printw(&ch_str);
-        refresh();
-      }
-    }
+
+  while ch != KEY_Q {
     ch = getch();
   }
 
+  destroy_window(title_window.orig_window);
+  destroy_window(matches_window.orig_window);
+
   endwin();
-}
-
-fn create_win(start_y: i32, start_x: i32) -> WINDOW {
-  let win = newwin(WINDOW_HEIGHT, WINDOW_WIDTH, start_y, start_x);
-  box_(win, 0, 0);
-  wrefresh(win);
-  win
-}
-
-fn destroy_win(win: WINDOW) {
-  let ch = ' ' as chtype;
-
-  wborder(win, ch, ch, ch, ch, ch, ch, ch, ch);
-  wrefresh(win);
-
-  delwin(win);
 }
