@@ -12,7 +12,7 @@ Personal tool to keep track of things locations. The 'o' stands for "Organize".
 - [ ] CRUD: Create, Read, Update, Delete
 - [ ] Search of entries via multiple approaches
 - [ ] Stats (e.g. nums of items) display
-- [ ] Data encryption / decription supporting a configuration file
+- [ ] Data encryption / decryption supporting a configuration file
 - [ ] Tree (hierarchy) display with several filters
 
 ## Requirements
