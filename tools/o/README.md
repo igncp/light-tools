@@ -10,6 +10,7 @@ Personal tool to keep track of things locations. The 'o' stands for "Organize".
 - [ ] Import and export from CSV format
     - Populate imported data (ids, dates?)
 - [ ] CRUD: Create, Read, Update, Delete
+    - Populate missing data: ids, dates
 - [ ] Search of entries via multiple approaches
 - [ ] Stats (e.g. nums of items) display
 - [ ] Data encryption / decryption supporting a configuration file

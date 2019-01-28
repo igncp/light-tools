@@ -75,6 +75,26 @@ fn init_project() {
     .unwrap();
 }
 
+fn write_all_records(records: &[Record]) {
+  let records_json = serde_json::to_string_pretty(&records).unwrap();
+
+  let mut file = OpenOptions::new()
+    .write(true)
+    .create_new(false)
+    .open(".o/o_data");
+
+  if file.is_err() {
+    file = OpenOptions::new()
+      .write(true)
+      .create_new(false)
+      .open([home_dir().unwrap().to_str().unwrap(), "/.o/o_data"].concat());
+  }
+
+  let mut file = file.unwrap();
+
+  file.write_all(records_json.as_bytes()).unwrap();
+}
+
 fn handle_csv(matches: &ArgMatches<'_>) {
   if matches.is_present("import") {
     let file_path = matches.value_of("import").unwrap();
@@ -110,14 +130,7 @@ fn handle_csv(matches: &ArgMatches<'_>) {
       });
     }
 
-    let records_json = serde_json::to_string_pretty(&records).unwrap();
-
-    let mut file = OpenOptions::new()
-      .write(true)
-      .create_new(false)
-      .open(".o/o_data")
-      .unwrap();
-    file.write_all(records_json.as_bytes()).unwrap();
+    write_all_records(&records);
   } else if matches.is_present("export") {
     let file_path = matches.value_of("export").unwrap();
     let records = get_data_records();
@@ -156,8 +169,55 @@ fn handle_search(matches: &ArgMatches<'_>) {
   }
 }
 
+fn handle_insert(matches: &ArgMatches<'_>) {
+  let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
+  let mut full_contents: Vec<String> = vec![contents[0].to_string()];
+
+  for content in contents.iter().skip(1) {
+    if *content != "$" {
+      let last = full_contents.pop().unwrap();
+      let full_last = [last, content.to_string()].join(" ");
+      full_contents.push(full_last.to_string());
+    } else {
+      full_contents.push("".to_string());
+    }
+  }
+
+  let mut records = get_data_records();
+  let notes = if full_contents.len() > 2 {
+    full_contents[2].to_string()
+  } else {
+    "N/A".to_string()
+  };
+  let new_record: Record = Record {
+    what: full_contents[0].to_string(),
+    what_id: 0,
+    location: full_contents[1].to_string(),
+    location_id: 1,
+    notes,
+    updated: "".to_string(),
+    created: "".to_string(),
+  };
+
+  records.push(new_record.clone());
+
+  write_all_records(&records);
+
+  println!("Inserted one record:");
+
+  new_record.print_line();
+}
+
+fn handle_list() {
+  let records = get_data_records();
+
+  for record in records {
+    record.print_line();
+  }
+}
+
 fn parse_args() {
-  let matches = App::new("o")
+  let mut app = App::new("o")
     .version("1.0")
     .about("Organizing helpers")
     .subcommand(SubCommand::with_name("init").about("Inits a new project"))
@@ -180,18 +240,31 @@ fn parse_args() {
         ),
     )
     .subcommand(
-      SubCommand::with_name("s")
+      SubCommand::with_name("se")
         .about("Search")
         .arg(Arg::with_name("CONTENT").multiple(true)),
     )
-    .get_matches();
+    .subcommand(
+      SubCommand::with_name("in")
+        .about("Insert")
+        .arg(Arg::with_name("CONTENT").multiple(true)),
+    )
+    .subcommand(SubCommand::with_name("ls").about("List"));
+
+  let matches = app.clone().get_matches();
 
   if matches.subcommand_matches("init").is_some() {
     init_project();
   } else if let Some(matches) = matches.subcommand_matches("csv") {
     handle_csv(matches);
-  } else if let Some(matches) = matches.subcommand_matches("s") {
+  } else if let Some(matches) = matches.subcommand_matches("se") {
     handle_search(matches);
+  } else if let Some(matches) = matches.subcommand_matches("in") {
+    handle_insert(matches);
+  } else if matches.subcommand_matches("ls").is_some() {
+    handle_list();
+  } else {
+    app.print_help().unwrap();
   }
 }
 
