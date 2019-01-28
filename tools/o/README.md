@@ -21,4 +21,4 @@ Personal tool to keep track of things locations. The 'o' stands for "Organize".
 - It must be _really_ fast to use
 - It must have a clear and customizable output
 - Data must be easily ported and encrypted
-- Ideally common output could be piped to tools like grep
+- Ideally common output could be piped to tools like grep or fzf
