@@ -1,12 +1,15 @@
 #[macro_use]
 extern crate serde_derive;
 
+use std::collections::HashMap;
+use std::fs::remove_file;
 use std::fs::DirBuilder;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufReader;
 
+use chrono::{DateTime, Local};
 use clap::{App, Arg, ArgMatches, SubCommand};
 use csv::ReaderBuilder;
 use dirs::home_dir;
@@ -33,8 +36,10 @@ struct CSVRecord {
 impl Record {
   fn print_line(&self) {
     print!("- {}", &self.what);
+    print!(" [{}]", &self.what_id);
     print!(" | ");
     print!("{}", &self.location);
+    print!(" [{}]", &self.location_id);
     print!(" | ");
     print!("{}", &self.updated);
     print!(" | ");
@@ -84,10 +89,14 @@ fn write_all_records(records: &[Record]) {
     .open(".o/o_data");
 
   if file.is_err() {
+    remove_file([home_dir().unwrap().to_str().unwrap(), "/.o/o_data"].concat()).ok();
+
     file = OpenOptions::new()
       .write(true)
-      .create_new(false)
+      .create_new(true)
       .open([home_dir().unwrap().to_str().unwrap(), "/.o/o_data"].concat());
+  } else {
+    remove_file(".o/o_data").unwrap();
   }
 
   let mut file = file.unwrap();
@@ -106,6 +115,7 @@ fn handle_csv(matches: &ArgMatches<'_>) {
 
     let csv_records: Vec<CSVRecord> = rdr
       .records()
+      .skip(1)
       .map(|x| {
         let result = x.unwrap();
         CSVRecord {
@@ -116,18 +126,37 @@ fn handle_csv(matches: &ArgMatches<'_>) {
         }
       })
       .collect();
+    let csv_records_len = csv_records.len();
     let mut records: Vec<Record> = vec![];
+    let mut what_ids: HashMap<String, usize> = HashMap::new();
 
-    for csv_record in csv_records {
+    for (idx, csv_record) in csv_records.iter().enumerate() {
+      let what = (*csv_record.what).to_string();
       records.push(Record {
-        what: csv_record.what,
-        updated: csv_record.updated,
-        location: csv_record.location,
-        notes: csv_record.notes,
-        created: "".to_string(),
-        what_id: 0,     // @TODO
-        location_id: 0, // @TODO
+        what: what.clone(),
+        updated: (*csv_record).updated.to_string(),
+        location: (*csv_record).location.to_string(),
+        notes: (*csv_record).notes.to_string(),
+        created: (*csv_record).updated.to_string(),
+        what_id: idx,
+        location_id: csv_records_len + idx,
       });
+
+      let entry = what_ids.get(&what);
+
+      if entry.is_some() {
+        panic!("Duplicated 'what' entry: {}", what);
+      }
+
+      what_ids.insert(what, idx);
+    }
+
+    for (idx, record) in records.clone().iter().enumerate() {
+      let entry = what_ids.get(&record.location);
+
+      if entry.is_some() {
+        records[idx].location_id = *entry.unwrap();
+      }
     }
 
     write_all_records(&records);
@@ -150,6 +179,35 @@ fn handle_csv(matches: &ArgMatches<'_>) {
       wtr.serialize(&record).unwrap();
     }
     wtr.flush().unwrap();
+  }
+}
+
+struct Context {
+  id_to_str_map: HashMap<usize, String>,
+  str_to_id_map: HashMap<String, usize>,
+  max_id: usize,
+}
+
+fn get_context(records: &[Record]) -> Context {
+  let mut str_to_id_map: HashMap<String, usize> = HashMap::new();
+  let mut id_to_str_map: HashMap<usize, String> = HashMap::new();
+  let mut max_id = 0;
+
+  for record in records {
+    str_to_id_map.insert(record.what.clone(), record.what_id);
+    str_to_id_map.insert(record.location.clone(), record.location_id);
+
+    id_to_str_map.insert(record.what_id, record.what.clone());
+    id_to_str_map.insert(record.location_id, record.location.clone());
+
+    max_id = std::cmp::max(max_id, record.location_id);
+    max_id = std::cmp::max(max_id, record.what_id);
+  }
+
+  Context {
+    str_to_id_map,
+    id_to_str_map,
+    max_id,
   }
 }
 
@@ -177,7 +235,7 @@ fn handle_insert(matches: &ArgMatches<'_>) {
     if *content != "$" {
       let last = full_contents.pop().unwrap();
       let full_last = [last, content.to_string()].join(" ");
-      full_contents.push(full_last.to_string());
+      full_contents.push(full_last.trim().to_string());
     } else {
       full_contents.push("".to_string());
     }
@@ -189,14 +247,46 @@ fn handle_insert(matches: &ArgMatches<'_>) {
   } else {
     "N/A".to_string()
   };
+
+  let context = get_context(&records);
+
+  let mut what = full_contents[0].to_string();
+  let mut what_id = context.max_id + 1;
+
+  if what.parse::<usize>().is_ok() {
+    what_id = what.parse::<usize>().unwrap();
+    what = context.id_to_str_map[&what_id].clone();
+  } else if context.str_to_id_map.get(&what).is_some() {
+    what_id = context.str_to_id_map[&what];
+  }
+
+  let mut location = full_contents[1].to_string();
+  let mut location_id = context.max_id + 2;
+
+  if location.parse::<usize>().is_ok() {
+    location_id = location.parse::<usize>().unwrap();
+    location = context.id_to_str_map[&location_id].clone();
+  } else if context.str_to_id_map.get(&location).is_some() {
+    location_id = context.str_to_id_map[&location];
+  }
+
+  for record in &records {
+    if record.what == what {
+      panic!("Duplicated what: {}", what);
+    }
+  }
+
+  let now: DateTime<Local> = Local::now();
+  let created = now.format("%d/%m/%y").to_string();
+  let updated = created.clone();
   let new_record: Record = Record {
-    what: full_contents[0].to_string(),
-    what_id: 0,
-    location: full_contents[1].to_string(),
-    location_id: 1,
+    what,
+    what_id,
+    location,
+    location_id,
     notes,
-    updated: "".to_string(),
-    created: "".to_string(),
+    updated,
+    created,
   };
 
   records.push(new_record.clone());
