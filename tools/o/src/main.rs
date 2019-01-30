@@ -225,12 +225,21 @@ fn get_context(records: &[Record]) -> Context {
 fn handle_search(matches: &ArgMatches<'_>) {
   let records = get_data_records();
   let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
+  let skip_location = matches.is_present("skip-location");
+  let skip_what = matches.is_present("skip-what");
 
   for record in records {
+    let what_l = record.what.to_ascii_lowercase();
+    let location_l = record.location.to_ascii_lowercase();
+
     for content in &contents {
       let content_l = content.to_ascii_lowercase();
-      let what_l = record.what.to_ascii_lowercase();
-      if what_l.contains(&content_l) {
+      if !skip_what && what_l.contains(&content_l) {
+        record.print_line();
+        break;
+      }
+
+      if !skip_location && location_l.contains(&content_l) {
         record.print_line();
         break;
       }
@@ -447,6 +456,18 @@ fn parse_args() {
     .subcommand(
       SubCommand::with_name("se")
         .about("Search")
+        .arg(
+          Arg::with_name("skip-what")
+            .long("skip-what")
+            .short("w")
+            .help("Skips what from search"),
+        )
+        .arg(
+          Arg::with_name("skip-location")
+            .long("skip-location")
+            .short("l")
+            .help("Skips location from search"),
+        )
         .arg(Arg::with_name("CONTENT").multiple(true)),
     )
     .subcommand(
