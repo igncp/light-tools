@@ -48,6 +48,12 @@ impl Record {
   }
 }
 
+fn get_now_date() -> String {
+  let now: DateTime<Local> = Local::now();
+
+  now.format("%d/%m/%y").to_string()
+}
+
 fn get_data_records() -> Vec<Record> {
   let mut file = File::open(".o/o_data");
 
@@ -185,15 +191,17 @@ fn handle_csv(matches: &ArgMatches<'_>) {
 struct Context {
   id_to_str_map: HashMap<usize, String>,
   str_to_id_map: HashMap<String, usize>,
+  id_to_record_idx_map: HashMap<usize, usize>,
   max_id: usize,
 }
 
 fn get_context(records: &[Record]) -> Context {
   let mut str_to_id_map: HashMap<String, usize> = HashMap::new();
   let mut id_to_str_map: HashMap<usize, String> = HashMap::new();
+  let mut id_to_record_idx_map: HashMap<usize, usize> = HashMap::new();
   let mut max_id = 0;
 
-  for record in records {
+  for (idx, record) in records.iter().enumerate() {
     str_to_id_map.insert(record.what.clone(), record.what_id);
     str_to_id_map.insert(record.location.clone(), record.location_id);
 
@@ -202,11 +210,14 @@ fn get_context(records: &[Record]) -> Context {
 
     max_id = std::cmp::max(max_id, record.location_id);
     max_id = std::cmp::max(max_id, record.what_id);
+
+    id_to_record_idx_map.insert(record.what_id, idx);
   }
 
   Context {
     str_to_id_map,
     id_to_str_map,
+    id_to_record_idx_map,
     max_id,
   }
 }
@@ -227,8 +238,7 @@ fn handle_search(matches: &ArgMatches<'_>) {
   }
 }
 
-fn handle_insert(matches: &ArgMatches<'_>) {
-  let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
+fn get_full_contents(contents: &[&str]) -> Vec<String> {
   let mut full_contents: Vec<String> = vec![contents[0].to_string()];
 
   for content in contents.iter().skip(1) {
@@ -240,6 +250,13 @@ fn handle_insert(matches: &ArgMatches<'_>) {
       full_contents.push("".to_string());
     }
   }
+
+  full_contents
+}
+
+fn handle_insert(matches: &ArgMatches<'_>) {
+  let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
+  let full_contents: Vec<String> = get_full_contents(&contents);
 
   let mut records = get_data_records();
   let notes = if full_contents.len() > 2 {
@@ -276,8 +293,7 @@ fn handle_insert(matches: &ArgMatches<'_>) {
     }
   }
 
-  let now: DateTime<Local> = Local::now();
-  let created = now.format("%d/%m/%y").to_string();
+  let created = get_now_date();
   let updated = created.clone();
   let new_record: Record = Record {
     what,
@@ -296,6 +312,105 @@ fn handle_insert(matches: &ArgMatches<'_>) {
   println!("Inserted one record:");
 
   new_record.print_line();
+}
+
+fn handle_edit(matches: &ArgMatches<'_>) {
+  let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
+  let id_str = contents[0];
+  let rest_contents: Vec<&str> = contents.iter().skip(1).cloned().collect();
+  let full_contents: Vec<String> = get_full_contents(&rest_contents);
+
+  let mut records = get_data_records();
+  let context = get_context(&records);
+  let what_id = id_str
+    .parse::<usize>()
+    .expect("You need to pass an id as first argument");
+
+  if context.id_to_str_map.get(&what_id).is_none() {
+    panic!("Unexisting id {}", what_id);
+  }
+
+  let record_idx = *context
+    .id_to_record_idx_map
+    .get(&what_id)
+    .expect("Unexisting id");
+  let new_what = full_contents[0].clone();
+
+  if new_what.as_str() != "" && new_what.as_str() != records[record_idx].what {
+    if context.str_to_id_map.get(&new_what).is_some() {
+      panic!("Existing new what: {}", new_what);
+    }
+
+    for (idx, _) in records.clone().iter().enumerate() {
+      if records[idx].what_id == what_id {
+        records[idx].what = new_what.clone();
+      } else if records[idx].location_id == what_id {
+        records[idx].location = new_what.clone();
+      }
+    }
+  }
+
+  if full_contents.len() > 1 {
+    let new_location = full_contents[1].clone();
+
+    if new_location.as_str() != "" && new_location.as_str() != records[record_idx].location {
+      let maybe_location_id = context.str_to_id_map.get(&new_location);
+      let new_location_id = if maybe_location_id.is_some() {
+        *maybe_location_id.unwrap()
+      } else {
+        context.max_id + 1
+      };
+
+      records[record_idx].location = new_location;
+      records[record_idx].location_id = new_location_id;
+    }
+  }
+
+  if full_contents.len() > 2 {
+    let mut new_notes = full_contents[2].clone();
+
+    if new_notes.as_str() != "" {
+      if new_notes.as_str() == "_" {
+        new_notes = "".to_string();
+      }
+
+      records[record_idx].notes = new_notes;
+    }
+  }
+
+  records[record_idx].updated = get_now_date();
+
+  println!("Record updated correctly");
+
+  write_all_records(&records)
+}
+
+fn handle_remove(matches: &ArgMatches<'_>) {
+  let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
+  let id_str = contents[0];
+  let what_id = id_str
+    .parse::<usize>()
+    .expect("You need to pass an id as first argument");
+
+  let mut records = get_data_records();
+  let context = get_context(&records);
+  let record_idx = *context
+    .id_to_record_idx_map
+    .get(&what_id)
+    .expect("Unexisting id");
+
+  records.remove(record_idx);
+
+  println!("Record removed correctly");
+
+  write_all_records(&records)
+}
+
+fn handle_stats() {
+  let records = get_data_records();
+
+  println!("Stats:");
+  println!("- Count: {}", records.len());
 }
 
 fn handle_list() {
@@ -339,6 +454,17 @@ fn parse_args() {
         .about("Insert")
         .arg(Arg::with_name("CONTENT").multiple(true)),
     )
+    .subcommand(
+      SubCommand::with_name("ed")
+        .about("Edit")
+        .arg(Arg::with_name("CONTENT").multiple(true)),
+    )
+    .subcommand(
+      SubCommand::with_name("rm")
+        .about("Remove")
+        .arg(Arg::with_name("CONTENT").multiple(true)),
+    )
+    .subcommand(SubCommand::with_name("st").about("Stats"))
     .subcommand(SubCommand::with_name("ls").about("List"));
 
   let matches = app.clone().get_matches();
@@ -351,6 +477,12 @@ fn parse_args() {
     handle_search(matches);
   } else if let Some(matches) = matches.subcommand_matches("in") {
     handle_insert(matches);
+  } else if let Some(matches) = matches.subcommand_matches("ed") {
+    handle_edit(matches);
+  } else if let Some(matches) = matches.subcommand_matches("rm") {
+    handle_remove(matches);
+  } else if matches.subcommand_matches("st").is_some() {
+    handle_stats();
   } else if matches.subcommand_matches("ls").is_some() {
     handle_list();
   } else {
