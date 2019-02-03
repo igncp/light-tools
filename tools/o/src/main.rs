@@ -77,6 +77,14 @@ fn get_data_records() -> Vec<Record> {
   records
 }
 
+fn get_is_empty_text(txt: &str) -> bool {
+  txt == "" || txt == "_"
+}
+
+fn get_empty_notes_text() -> String {
+  "N/A".to_string()
+}
+
 fn init_project() {
   let project_dir = ".o";
 
@@ -380,7 +388,7 @@ fn handle_insert(matches: &ArgMatches<'_>) {
   let notes = if full_contents.len() > 2 {
     full_contents[2].to_string()
   } else {
-    "N/A".to_string()
+    get_empty_notes_text()
   };
 
   let context = get_context(&records);
@@ -450,73 +458,102 @@ fn handle_edit(matches: &ArgMatches<'_>) {
     .parse::<usize>()
     .expect("You need to pass an id as first argument");
 
-  if context.id_to_str_map.get(&what_id).is_none() {
-    panic!("Unexisting id {}", what_id);
-  }
+  if context.id_to_str_map.get(&what_id).is_none()
+    || context.id_to_record_idx_map.get(&what_id).is_none()
+  {
+    if context.hierarchy.get(&what_id).is_none() || full_contents.len() != 1 {
+      panic!("Unexisting id {}", what_id);
+    }
 
-  let maybe_record_idx = context.id_to_record_idx_map.get(&what_id);
+    // the edit is a rename of a location in 1..n records
+    let old_location_id = what_id;
 
-  if maybe_record_idx.is_none() {
-    if context.hierarchy.get(&what_id).is_some() {
-      println!(
-        "This id is a location id but it doesn't have an existing entry: {}",
-        what_id
-      );
+    let mut new_location = full_contents[0].clone();
+    let new_location_id: usize;
+
+    if let Ok(val) = new_location.parse::<usize>() {
+      new_location_id = val;
+      new_location = context.id_to_str_map[&new_location_id].clone();
     } else {
-      println!("This id is not a location id or entry id: {}", what_id);
-    }
-
-    std::process::exit(1);
-  }
-
-  let record_idx = *maybe_record_idx.unwrap();
-  let new_what = full_contents[0].clone();
-
-  if new_what.as_str() != "" && new_what.as_str() != records[record_idx].what {
-    if context.str_to_id_map.get(&new_what).is_some() {
-      panic!("Existing new what: {}", new_what);
-    }
-
-    for (idx, _) in records.clone().iter().enumerate() {
-      if records[idx].what_id == what_id {
-        records[idx].what = new_what.clone();
-      } else if records[idx].location_id == what_id {
-        records[idx].location = new_what.clone();
-      }
-    }
-  }
-
-  if full_contents.len() > 1 {
-    let new_location = full_contents[1].clone();
-
-    if new_location.as_str() != "" && new_location.as_str() != records[record_idx].location {
       let maybe_location_id = context.str_to_id_map.get(&new_location);
-      let new_location_id = if maybe_location_id.is_some() {
+      new_location_id = if maybe_location_id.is_some() {
         *maybe_location_id.unwrap()
       } else {
         context.max_id + 1
       };
-
-      records[record_idx].location = new_location;
-      records[record_idx].location_id = new_location_id;
     }
-  }
 
-  if full_contents.len() > 2 {
-    let mut new_notes = full_contents[2].clone();
+    for record in records.iter_mut() {
+      if record.location_id == old_location_id {
+        record.location_id = new_location_id;
+        record.location = new_location.clone();
+      }
+    }
+  } else {
+    let record_idx = context.id_to_record_idx_map[&what_id];
+    let mut new_what = full_contents[0].clone();
+    let mut new_what_id = what_id;
 
-    if new_notes.as_str() != "" {
-      if new_notes.as_str() == "_" {
-        new_notes = "".to_string();
+    if !get_is_empty_text(&new_what) && new_what.as_str() != records[record_idx].what {
+      if let Ok(val) = new_what.parse::<usize>() {
+        new_what_id = val;
+        new_what = context.id_to_str_map[&new_what_id].clone();
       }
 
-      records[record_idx].notes = new_notes;
+      if context.str_to_id_map.get(&new_what).is_some() {
+        panic!("Existing new what: {}", new_what);
+      }
+
+      for (idx, _) in records.clone().iter().enumerate() {
+        if records[idx].what_id == what_id {
+          records[idx].what = new_what.clone();
+          records[idx].what_id = new_what_id;
+        } else if records[idx].location_id == what_id {
+          records[idx].location = new_what.clone();
+        }
+      }
     }
+
+    if full_contents.len() > 1 {
+      let mut new_location = full_contents[1].clone();
+
+      if !get_is_empty_text(&new_location) && new_location.as_str() != records[record_idx].location
+      {
+        let new_location_id;
+
+        if let Ok(val) = new_location.parse::<usize>() {
+          new_location_id = val;
+          new_location = context.id_to_str_map[&new_location_id].clone();
+        } else {
+          let maybe_location_id = context.str_to_id_map.get(&new_location);
+          new_location_id = if maybe_location_id.is_some() {
+            *maybe_location_id.unwrap()
+          } else {
+            context.max_id + 1
+          };
+        }
+
+        records[record_idx].location = new_location;
+        records[record_idx].location_id = new_location_id;
+      }
+    }
+
+    if full_contents.len() > 2 {
+      let mut new_notes = full_contents[2].clone();
+
+      if !get_is_empty_text(&new_notes) {
+        if new_notes.as_str() == "-" {
+          new_notes = get_empty_notes_text();
+        }
+
+        records[record_idx].notes = new_notes;
+      }
+    }
+
+    records[record_idx].updated = get_now_date();
   }
 
-  records[record_idx].updated = get_now_date();
-
-  println!("Record updated correctly");
+  println!("Record(s) updated correctly");
 
   write_all_records(&records)
 }
