@@ -454,10 +454,22 @@ fn handle_edit(matches: &ArgMatches<'_>) {
     panic!("Unexisting id {}", what_id);
   }
 
-  let record_idx = *context
-    .id_to_record_idx_map
-    .get(&what_id)
-    .expect("Unexisting id");
+  let maybe_record_idx = context.id_to_record_idx_map.get(&what_id);
+
+  if maybe_record_idx.is_none() {
+    if context.hierarchy.get(&what_id).is_some() {
+      println!(
+        "This id is a location id but it doesn't have an existing entry: {}",
+        what_id
+      );
+    } else {
+      println!("This id is not a location id or entry id: {}", what_id);
+    }
+
+    std::process::exit(1);
+  }
+
+  let record_idx = *maybe_record_idx.unwrap();
   let new_what = full_contents[0].clone();
 
   if new_what.as_str() != "" && new_what.as_str() != records[record_idx].what {
