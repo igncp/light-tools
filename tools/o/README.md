@@ -2,7 +2,7 @@
 
 Personal tool to keep track of things locations. The 'o' stands for "Organize".
 
-## Planned initial set of features
+## Planned features
 
 - [x] Create CLI commands parser
 - [x] Project initializer:
@@ -15,12 +15,22 @@ Personal tool to keep track of things locations. The 'o' stands for "Organize".
     - [x] Count
     - [ ] Last creation
     - [ ] Last update
-    - [ ] Items without container
+- [ ] Tree (hierarchy) display with several filters
+    - [x] Tree display
+    - [ ] Choose starting node
+- [ ] List entries
+    - [x] List entries by order of creation (default)
+    - [ ] List entries by order of update
+    - [ ] List entries by hierarchy order
 - [ ] Search of entries via multiple approaches
+    - [x] Search by string
+    - [x] Search by id
+    - [ ] Search by updated in range
+    - [ ] Search by created in range
 - [ ] Data encryption / decryption supporting a configuration file
     - [ ] Put key (ignored by git) and configuration (not ignored by git) in different files
-- [ ] Tree (hierarchy) display with several filters
 - [ ] Possibility to UNDO latest N writes (edits, additions, deletions)
+    - [ ] Create N (configurable) files of backup that are updated when data changes
 
 ## Requirements
 

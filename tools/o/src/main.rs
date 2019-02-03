@@ -47,6 +47,15 @@ impl Record {
     print!("{}", &self.notes);
     println!();
   }
+
+  fn print_location_with_count(&self, context: &Context) {
+    let count = context.hierarchy[&self.location_id].children.len();
+
+    print!("- {}", &self.location);
+    print!(" [{}]", &self.location_id);
+    print!(" <{} items>", count);
+    println!();
+  }
 }
 
 fn get_now_date() -> String {
@@ -135,36 +144,44 @@ fn handle_csv(matches: &ArgMatches<'_>) {
       .collect();
     let csv_records_len = csv_records.len();
     let mut records: Vec<Record> = vec![];
+
     let mut what_ids: HashMap<String, usize> = HashMap::new();
+    let mut location_ids: HashMap<String, usize> = HashMap::new();
 
     for (idx, csv_record) in csv_records.iter().enumerate() {
       let what = (*csv_record.what).to_string();
+      let location = (*csv_record).location.to_string();
+      let what_id = idx;
+      let location_id = csv_records_len + idx;
+
       records.push(Record {
         what: what.clone(),
         updated: (*csv_record).updated.to_string(),
-        location: (*csv_record).location.to_string(),
+        location: location.clone(),
         notes: (*csv_record).notes.to_string(),
         created: (*csv_record).updated.to_string(),
-        what_id: idx,
+        what_id,
         location_id: csv_records_len + idx,
       });
 
-      let entry = what_ids.get(&what);
-
-      if entry.is_some() {
+      if what_ids.get(&what).is_some() {
         panic!("Duplicated 'what' entry: {}", what);
+      } else if location_ids.get(&location).is_none() {
+        location_ids.insert(location, location_id);
       }
 
-      what_ids.insert(what, idx);
+      what_ids.insert(what, what_id);
     }
 
     for (idx, record) in records.clone().iter().enumerate() {
-      let entry = what_ids.get(&record.location);
-
-      if entry.is_some() {
-        records[idx].location_id = *entry.unwrap();
+      if what_ids.get(&record.location).is_some() {
+        records[idx].location_id = what_ids[&record.location];
+      } else if location_ids.get(&record.location).is_some() {
+        records[idx].location_id = location_ids[&record.location];
       }
     }
+
+    optimize_records_ids(&mut records);
 
     write_all_records(&records);
   } else if matches.is_present("export") {
@@ -192,7 +209,7 @@ fn handle_csv(matches: &ArgMatches<'_>) {
 #[derive(Debug, Clone)]
 struct TreeNode {
   children: HashSet<usize>,
-  parent: Option<usize>
+  parent: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -214,7 +231,7 @@ fn get_context(records: &[Record]) -> Context {
   for (idx, record) in records.iter().enumerate() {
     let empty_branch = TreeNode {
       parent: None,
-      children: HashSet::new()
+      children: HashSet::new(),
     };
 
     str_to_id_map.insert(record.what.clone(), record.what_id);
@@ -223,10 +240,14 @@ fn get_context(records: &[Record]) -> Context {
     id_to_str_map.insert(record.what_id, record.what.clone());
     id_to_str_map.insert(record.location_id, record.location.clone());
 
-    let what_branch = hierarchy.entry(record.what_id).or_insert(empty_branch.clone());
+    let what_branch = hierarchy
+      .entry(record.what_id)
+      .or_insert_with(|| empty_branch.clone());
     what_branch.parent = Some(record.location_id);
 
-    let location_branch = hierarchy.entry(record.location_id).or_insert(empty_branch.clone());
+    let location_branch = hierarchy
+      .entry(record.location_id)
+      .or_insert_with(|| empty_branch.clone());
     location_branch.children.insert(record.what_id);
 
     max_id = std::cmp::max(max_id, record.location_id);
@@ -244,6 +265,65 @@ fn get_context(records: &[Record]) -> Context {
   }
 }
 
+fn optimize_records_ids(records: &mut Vec<Record>) {
+  fn get_last_correct_id_idx(existing_ids: &[usize], starting_item: usize) -> Option<usize> {
+    let offset = starting_item + 1;
+    for (idx, existing_id) in existing_ids.iter().skip(offset).enumerate() {
+      let real_idx = idx + offset;
+
+      if *existing_id != real_idx {
+        return Some(offset - 1);
+      }
+    }
+
+    None
+  }
+
+  let mut existing_ids_set: HashSet<usize> = HashSet::new();
+
+  for record in records.iter() {
+    existing_ids_set.insert(record.what_id);
+    existing_ids_set.insert(record.location_id);
+  }
+
+  let mut existing_ids = existing_ids_set.iter().cloned().collect::<Vec<usize>>();
+  existing_ids.sort();
+
+  if existing_ids[0] != 0 {
+    let next_wrong_id = existing_ids[0];
+    let next_correct_id = 0;
+
+    for record in records.iter_mut() {
+      if record.what_id == next_wrong_id {
+        record.what_id = next_correct_id;
+      } else if record.location_id == next_wrong_id {
+        record.location_id = next_correct_id;
+      }
+    }
+  }
+
+  let mut last_correct_id_idx = get_last_correct_id_idx(&existing_ids, 0);
+
+  while last_correct_id_idx != None {
+    let last_correct_id_idx_val = last_correct_id_idx.unwrap();
+    let last_correct_id = existing_ids[last_correct_id_idx_val];
+    let next_correct_id = last_correct_id + 1;
+    let next_wrong_id = existing_ids[last_correct_id_idx_val + 1];
+
+    for record in records.iter_mut() {
+      if record.what_id == next_wrong_id {
+        record.what_id = next_correct_id;
+      } else if record.location_id == next_wrong_id {
+        record.location_id = next_correct_id;
+      }
+    }
+
+    existing_ids[last_correct_id_idx_val + 1] = next_correct_id;
+
+    last_correct_id_idx = get_last_correct_id_idx(&existing_ids, last_correct_id_idx_val + 1);
+  }
+}
+
 fn handle_search(matches: &ArgMatches<'_>) {
   let records = get_data_records();
   let contents = matches.values_of("CONTENT").unwrap().collect::<Vec<&str>>();
@@ -255,13 +335,20 @@ fn handle_search(matches: &ArgMatches<'_>) {
     let location_l = record.location.to_ascii_lowercase();
 
     for content in &contents {
-      let content_l = content.to_ascii_lowercase();
-      if !skip_what && what_l.contains(&content_l) {
-        record.print_line();
-        break;
+      let parsed = content.parse::<usize>();
+      if parsed.is_ok() {
+        let id = parsed.unwrap();
+
+        if !skip_what && record.what_id == id || !skip_location && record.location_id == id {
+          record.print_line();
+          break;
+        }
       }
 
-      if !skip_location && location_l.contains(&content_l) {
+      let content_l = content.to_ascii_lowercase();
+      if !skip_what && what_l.contains(&content_l)
+        || !skip_location && location_l.contains(&content_l)
+      {
         record.print_line();
         break;
       }
@@ -350,6 +437,12 @@ fn handle_edit(matches: &ArgMatches<'_>) {
   let id_str = contents[0];
   let rest_contents: Vec<&str> = contents.iter().skip(1).cloned().collect();
   let full_contents: Vec<String> = get_full_contents(&rest_contents);
+
+  // if first content is '' it would not have any chars
+  let first_content_chars = rest_contents[0].chars().take(1).collect::<Vec<char>>();
+  if !first_content_chars.is_empty() && first_content_chars[0] == '$' {
+    panic!("Unexpected $ char as first item in edit");
+  }
 
   let mut records = get_data_records();
   let context = get_context(&records);
@@ -453,11 +546,112 @@ fn handle_stats() {
   println!("- Root nodes: {}", root_nodes_num);
 }
 
-fn handle_list() {
-  let records = get_data_records();
+fn handle_optimize_data() {
+  let mut records = get_data_records();
 
-  for record in records {
-    record.print_line();
+  optimize_records_ids(&mut records);
+
+  println!("Data was optimized successfully.");
+
+  write_all_records(&records)
+}
+
+fn handle_list(matches: &ArgMatches<'_>) {
+  let records = get_data_records();
+  let node_type = matches.value_of("node-type").unwrap_or("all");
+
+  match node_type {
+    "all" | "root" | "leaf" => {}
+    _ => {
+      panic!("Unknown passed node type");
+    }
+  }
+
+  if node_type == "all" {
+    for record in records {
+      record.print_line();
+    }
+
+    return;
+  }
+
+  let context = get_context(&records);
+
+  if node_type == "root" {
+    let mut printed_ids: HashSet<usize> = HashSet::new();
+
+    for record in records {
+      if context.hierarchy[&record.location_id].parent.is_none()
+        && !printed_ids.contains(&record.location_id)
+      {
+        record.print_location_with_count(&context);
+        printed_ids.insert(record.location_id);
+      }
+    }
+  } else if node_type == "leaf" {
+    for record in records {
+      if context.hierarchy[&record.what_id].children.is_empty() {
+        record.print_line();
+      }
+    }
+  }
+}
+
+fn handle_tree() {
+  fn print_recursive(
+    record_id: usize,
+    context: &Context,
+    records: &[Record],
+    depth: usize,
+  ) -> usize {
+    let str = context.id_to_str_map[&record_id].clone();
+    let mut last_depth = depth;
+    let tree_node = context.hierarchy.get(&record_id);
+    let has_children = match tree_node {
+      None => false,
+      Some(v) => !v.children.is_empty(),
+    };
+    let prefix = if has_children { "+" } else { "-" };
+
+    println!(
+      "{}{} {} [{}]",
+      " ".repeat(depth * 6),
+      prefix,
+      str,
+      record_id
+    );
+
+    if tree_node.is_some() {
+      for (idx, child_id) in tree_node.unwrap().children.iter().enumerate() {
+        if idx == 0 {
+          last_depth = depth + 1;
+        }
+
+        if last_depth != depth + 1 {
+          println!();
+        }
+
+        last_depth = print_recursive(*child_id, &context, &records, depth + 1);
+      }
+    }
+
+    last_depth
+  }
+
+  let records = get_data_records();
+  let context = get_context(&records);
+
+  println!("<top>");
+
+  let mut depth = 1;
+  for id in context.hierarchy.keys() {
+    if context.hierarchy[id].parent.is_none() {
+      if depth != 1 {
+        println!();
+      }
+
+      depth = print_recursive(*id, &context, &records, 1);
+    }
   }
 }
 
@@ -517,7 +711,17 @@ fn parse_args() {
         .arg(Arg::with_name("CONTENT").multiple(true)),
     )
     .subcommand(SubCommand::with_name("st").about("Stats"))
-    .subcommand(SubCommand::with_name("ls").about("List"));
+    .subcommand(SubCommand::with_name("optimize-data").about("Optimize data"))
+    .subcommand(SubCommand::with_name("tree").about("Display in a tree fashion"))
+    .subcommand(
+      SubCommand::with_name("ls").about("List").arg(
+        Arg::with_name("node-type")
+          .long("node-type")
+          .short("n")
+          .value_name("VALUE")
+          .help("Node type ['root' | 'leaf' | 'all']"),
+      ),
+    );
 
   let matches = app.clone().get_matches();
 
@@ -535,8 +739,12 @@ fn parse_args() {
     handle_remove(matches);
   } else if matches.subcommand_matches("st").is_some() {
     handle_stats();
-  } else if matches.subcommand_matches("ls").is_some() {
-    handle_list();
+  } else if matches.subcommand_matches("optimize-data").is_some() {
+    handle_optimize_data();
+  } else if matches.subcommand_matches("tree").is_some() {
+    handle_tree();
+  } else if let Some(matches) = matches.subcommand_matches("ls") {
+    handle_list(matches);
   } else {
     app.print_help().unwrap();
   }
