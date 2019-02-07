@@ -1,62 +1,21 @@
+mod data;
+mod storage;
+
 #[macro_use]
 extern crate serde_derive;
 
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs::remove_file;
-use std::fs::DirBuilder;
 use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::prelude::*;
 use std::io::BufReader;
 
 use chrono::{DateTime, Local};
 use clap::{App, Arg, ArgMatches, SubCommand};
-use csv::ReaderBuilder;
 use dirs::home_dir;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct Record {
-  created: String,
-  location: String,
-  location_id: usize,
-  notes: String,
-  updated: String,
-  what: String,
-  what_id: usize,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct CSVRecord {
-  what: String,
-  location: String,
-  updated: String,
-  notes: String,
-}
-
-impl Record {
-  fn print_line(&self) {
-    print!("- {}", &self.what);
-    print!(" [{}]", &self.what_id);
-    print!(" | ");
-    print!("{}", &self.location);
-    print!(" [{}]", &self.location_id);
-    print!(" | ");
-    print!("{}", &self.updated);
-    print!(" | ");
-    print!("{}", &self.notes);
-    println!();
-  }
-
-  fn print_location_with_count(&self, context: &Context) {
-    let count = context.hierarchy[&self.location_id].children.len();
-
-    print!("- {}", &self.location);
-    print!(" [{}]", &self.location_id);
-    print!(" <{} items>", count);
-    println!();
-  }
-}
+use crate::data::{get_context, Context, Record};
+use crate::storage::{
+  handle_csv, init_project, optimize_records_ids, revert_data_to_backup, write_all_records,
+};
 
 fn get_now_date() -> String {
   let now: DateTime<Local> = Local::now();
@@ -72,7 +31,7 @@ fn get_data_records() -> Vec<Record> {
   }
 
   let reader = BufReader::new(file.unwrap());
-  let records: Vec<Record> = serde_json::from_reader(reader).unwrap();
+  let records: Vec<Record> = serde_json::from_reader(reader).unwrap_or_else(|_| vec![]);
 
   records
 }
@@ -85,251 +44,10 @@ fn get_empty_notes_text() -> String {
   "N/A".to_string()
 }
 
-fn init_project() {
-  let project_dir = ".o";
-
-  DirBuilder::new()
-    .recursive(true)
-    .create(project_dir)
-    .unwrap();
-
-  let mut git_ignore_file = File::create([project_dir, "/.gitignore"].concat()).unwrap();
-  let mut config_file = File::create([project_dir, "/o_config.toml"].concat()).unwrap();
-
-  File::create([project_dir, "/o_data"].concat()).unwrap();
-
-  git_ignore_file.write_all(b"o_config.toml").unwrap();
-  config_file
-    .write_all(b"encryption_key = \"change_this\"")
-    .unwrap();
-}
-
-fn write_all_records(records: &[Record]) {
-  let records_json = serde_json::to_string_pretty(&records).unwrap();
-
-  let mut file = OpenOptions::new()
-    .write(true)
-    .create_new(false)
-    .open(".o/o_data");
-
-  if file.is_err() {
-    remove_file([home_dir().unwrap().to_str().unwrap(), "/.o/o_data"].concat()).ok();
-
-    file = OpenOptions::new()
-      .write(true)
-      .create_new(true)
-      .open([home_dir().unwrap().to_str().unwrap(), "/.o/o_data"].concat());
-  } else {
-    remove_file(".o/o_data").unwrap();
-  }
-
-  let mut file = file.unwrap();
-
-  file.write_all(records_json.as_bytes()).unwrap();
-}
-
-fn handle_csv(matches: &ArgMatches<'_>) {
-  if matches.is_present("import") {
-    let file_path = matches.value_of("import").unwrap();
-
-    let mut rdr = ReaderBuilder::new()
-      .has_headers(false)
-      .from_path(file_path)
-      .unwrap();
-
-    let csv_records: Vec<CSVRecord> = rdr
-      .records()
-      .skip(1)
-      .map(|x| {
-        let result = x.unwrap();
-        CSVRecord {
-          what: result[0].to_string(),
-          location: result[1].to_string(),
-          updated: result[2].to_string(),
-          notes: result[3].to_string(),
-        }
-      })
-      .collect();
-    let csv_records_len = csv_records.len();
-    let mut records: Vec<Record> = vec![];
-
-    let mut what_ids: HashMap<String, usize> = HashMap::new();
-    let mut location_ids: HashMap<String, usize> = HashMap::new();
-
-    for (idx, csv_record) in csv_records.iter().enumerate() {
-      let what = (*csv_record.what).to_string();
-      let location = (*csv_record).location.to_string();
-      let what_id = idx;
-      let location_id = csv_records_len + idx;
-
-      records.push(Record {
-        what: what.clone(),
-        updated: (*csv_record).updated.to_string(),
-        location: location.clone(),
-        notes: (*csv_record).notes.to_string(),
-        created: (*csv_record).updated.to_string(),
-        what_id,
-        location_id: csv_records_len + idx,
-      });
-
-      if what_ids.get(&what).is_some() {
-        panic!("Duplicated 'what' entry: {}", what);
-      } else if location_ids.get(&location).is_none() {
-        location_ids.insert(location, location_id);
-      }
-
-      what_ids.insert(what, what_id);
-    }
-
-    for (idx, record) in records.clone().iter().enumerate() {
-      if what_ids.get(&record.location).is_some() {
-        records[idx].location_id = what_ids[&record.location];
-      } else if location_ids.get(&record.location).is_some() {
-        records[idx].location_id = location_ids[&record.location];
-      }
-    }
-
-    optimize_records_ids(&mut records);
-
-    write_all_records(&records);
-  } else if matches.is_present("export") {
-    let file_path = matches.value_of("export").unwrap();
-    let records = get_data_records();
-    let mut csv_records: Vec<CSVRecord> = vec![];
-
-    for record in records.clone() {
-      csv_records.push(CSVRecord {
-        what: record.what,
-        location: record.location,
-        updated: record.updated,
-        notes: record.notes,
-      });
-    }
-
-    let mut wtr = csv::Writer::from_path(file_path).unwrap();
-    for record in records {
-      wtr.serialize(&record).unwrap();
-    }
-    wtr.flush().unwrap();
-  }
-}
-
 #[derive(Debug, Clone)]
 struct TreeNode {
   children: HashSet<usize>,
   parent: Option<usize>,
-}
-
-#[derive(Debug, Clone)]
-struct Context {
-  id_to_str_map: HashMap<usize, String>,
-  str_to_id_map: HashMap<String, usize>,
-  id_to_record_idx_map: HashMap<usize, usize>,
-  hierarchy: HashMap<usize, TreeNode>,
-  max_id: usize,
-}
-
-fn get_context(records: &[Record]) -> Context {
-  let mut str_to_id_map: HashMap<String, usize> = HashMap::new();
-  let mut id_to_str_map: HashMap<usize, String> = HashMap::new();
-  let mut id_to_record_idx_map: HashMap<usize, usize> = HashMap::new();
-  let mut hierarchy: HashMap<usize, TreeNode> = HashMap::new();
-  let mut max_id = 0;
-
-  for (idx, record) in records.iter().enumerate() {
-    let empty_branch = TreeNode {
-      parent: None,
-      children: HashSet::new(),
-    };
-
-    str_to_id_map.insert(record.what.clone(), record.what_id);
-    str_to_id_map.insert(record.location.clone(), record.location_id);
-
-    id_to_str_map.insert(record.what_id, record.what.clone());
-    id_to_str_map.insert(record.location_id, record.location.clone());
-
-    let what_branch = hierarchy
-      .entry(record.what_id)
-      .or_insert_with(|| empty_branch.clone());
-    what_branch.parent = Some(record.location_id);
-
-    let location_branch = hierarchy
-      .entry(record.location_id)
-      .or_insert_with(|| empty_branch.clone());
-    location_branch.children.insert(record.what_id);
-
-    max_id = std::cmp::max(max_id, record.location_id);
-    max_id = std::cmp::max(max_id, record.what_id);
-
-    id_to_record_idx_map.insert(record.what_id, idx);
-  }
-
-  Context {
-    str_to_id_map,
-    id_to_str_map,
-    id_to_record_idx_map,
-    hierarchy,
-    max_id,
-  }
-}
-
-fn optimize_records_ids(records: &mut Vec<Record>) {
-  fn get_last_correct_id_idx(existing_ids: &[usize], starting_item: usize) -> Option<usize> {
-    let offset = starting_item + 1;
-    for (idx, existing_id) in existing_ids.iter().skip(offset).enumerate() {
-      let real_idx = idx + offset;
-
-      if *existing_id != real_idx {
-        return Some(offset - 1);
-      }
-    }
-
-    None
-  }
-
-  let mut existing_ids_set: HashSet<usize> = HashSet::new();
-
-  for record in records.iter() {
-    existing_ids_set.insert(record.what_id);
-    existing_ids_set.insert(record.location_id);
-  }
-
-  let mut existing_ids = existing_ids_set.iter().cloned().collect::<Vec<usize>>();
-  existing_ids.sort();
-
-  if existing_ids[0] != 0 {
-    let next_wrong_id = existing_ids[0];
-    let next_correct_id = 0;
-
-    for record in records.iter_mut() {
-      if record.what_id == next_wrong_id {
-        record.what_id = next_correct_id;
-      } else if record.location_id == next_wrong_id {
-        record.location_id = next_correct_id;
-      }
-    }
-  }
-
-  let mut last_correct_id_idx = get_last_correct_id_idx(&existing_ids, 0);
-
-  while last_correct_id_idx != None {
-    let last_correct_id_idx_val = last_correct_id_idx.unwrap();
-    let last_correct_id = existing_ids[last_correct_id_idx_val];
-    let next_correct_id = last_correct_id + 1;
-    let next_wrong_id = existing_ids[last_correct_id_idx_val + 1];
-
-    for record in records.iter_mut() {
-      if record.what_id == next_wrong_id {
-        record.what_id = next_correct_id;
-      } else if record.location_id == next_wrong_id {
-        record.location_id = next_correct_id;
-      }
-    }
-
-    existing_ids[last_correct_id_idx_val + 1] = next_correct_id;
-
-    last_correct_id_idx = get_last_correct_id_idx(&existing_ids, last_correct_id_idx_val + 1);
-  }
 }
 
 fn handle_search(matches: &ArgMatches<'_>) {
@@ -415,7 +133,8 @@ fn handle_insert(matches: &ArgMatches<'_>) {
 
   for record in &records {
     if record.what == what {
-      panic!("Duplicated what: {}", what);
+      println!("Duplicated what: {}", what);
+      std::process::exit(1);
     }
   }
 
@@ -449,7 +168,8 @@ fn handle_edit(matches: &ArgMatches<'_>) {
   // if first content is '' it would not have any chars
   let first_content_chars = rest_contents[0].chars().take(1).collect::<Vec<char>>();
   if !first_content_chars.is_empty() && first_content_chars[0] == '$' {
-    panic!("Unexpected $ char as first item in edit");
+    println!("Unexpected $ char as first item in edit");
+    std::process::exit(1);
   }
 
   let mut records = get_data_records();
@@ -462,7 +182,8 @@ fn handle_edit(matches: &ArgMatches<'_>) {
     || context.id_to_record_idx_map.get(&what_id).is_none()
   {
     if context.hierarchy.get(&what_id).is_none() || full_contents.len() != 1 {
-      panic!("Unexisting id {}", what_id);
+      println!("Unexisting id {}", what_id);
+      std::process::exit(1);
     }
 
     // the edit is a rename of a location in 1..n records
@@ -704,6 +425,10 @@ fn handle_tree() {
   }
 }
 
+fn handle_revert() {
+  revert_data_to_backup();
+}
+
 fn parse_args() {
   let mut app = App::new("o")
     .version("1.0")
@@ -763,6 +488,9 @@ fn parse_args() {
     .subcommand(SubCommand::with_name("optimize-data").about("Optimize data"))
     .subcommand(SubCommand::with_name("tree").about("Display in a tree fashion"))
     .subcommand(
+      SubCommand::with_name("rev").about("Revert previous write operation from the backup"),
+    )
+    .subcommand(
       SubCommand::with_name("ls").about("List").arg(
         Arg::with_name("node-type")
           .long("node-type")
@@ -792,6 +520,8 @@ fn parse_args() {
     handle_optimize_data();
   } else if matches.subcommand_matches("tree").is_some() {
     handle_tree();
+  } else if matches.subcommand_matches("rev").is_some() {
+    handle_revert();
   } else if let Some(matches) = matches.subcommand_matches("ls") {
     handle_list(matches);
   } else {

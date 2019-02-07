@@ -27,10 +27,13 @@ Personal tool to keep track of things locations. The 'o' stands for "Organize".
     - [x] Search by id
     - [ ] Search by updated in range
     - [ ] Search by created in range
+- [ ] Possibility to UNDO latest N writes (edits, additions, deletions)
+    - [x] Create a `.o/backups` directory
+    - [x] Create N (configurable) files of backup that are updated when data changes
+    - [x] Support using a backup file by using the `rev` subcommand
 - [ ] Data encryption / decryption supporting a configuration file
     - [ ] Put key (ignored by git) and configuration (not ignored by git) in different files
-- [ ] Possibility to UNDO latest N writes (edits, additions, deletions)
-    - [ ] Create N (configurable) files of backup that are updated when data changes
+    - [ ] Encrypt data file when writing and decrypt when reading
 
 ## Requirements
 
