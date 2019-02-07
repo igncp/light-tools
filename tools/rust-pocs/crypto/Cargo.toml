@@ -1,0 +1,10 @@
+[package]
+name = "crypto"
+version = "0.1.0"
+authors = ["Ignacio Carbajo <icarbajop@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+aes-soft = "0.3.3"
+hex-literal = "0.1.2"
+block-modes = "0.3.2"
